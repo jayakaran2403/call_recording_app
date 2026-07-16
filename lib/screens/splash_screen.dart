@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 import '../core/theme.dart';
 import '../providers/auth_provider.dart';
 import 'dashboard_screen.dart';
@@ -21,7 +20,16 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
   }
 
   Future<void> _bootstrap() async {
-    await ref.read(authProvider.notifier).restoreSession();
+    try {
+      await ref
+          .read(authProvider.notifier)
+          .restoreSession()
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {
+      // If session restore hangs or throws (e.g. first-run keystore/DB
+      // initialization issue), fall through to the login screen rather
+      // than leaving the user stuck on splash indefinitely.
+    }
     await Future.delayed(const Duration(milliseconds: 900));
     if (!mounted) return;
 
