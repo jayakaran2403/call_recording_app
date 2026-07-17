@@ -1,90 +1,68 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/constants.dart';
 import '../models/employee.dart';
-import '../repository/auth_repository.dart';
-
-final authRepositoryProvider = Provider<AuthRepository>((ref) {
-  return AuthRepository();
-});
 
 class AuthState {
   final Employee? employee;
   final bool isLoading;
-  final String? errorMessage;
 
-  const AuthState({this.employee, this.isLoading = false, this.errorMessage});
+  const AuthState({this.employee, this.isLoading = false});
 
   bool get isLoggedIn => employee != null;
-
-  AuthState copyWith({
-    Employee? employee,
-    bool? isLoading,
-    String? errorMessage,
-    bool clearError = false,
-  }) {
-    return AuthState(
-      employee: employee ?? this.employee,
-      isLoading: isLoading ?? this.isLoading,
-      errorMessage: clearError ? null : errorMessage ?? this.errorMessage,
-    );
-  }
 }
 
 class AuthNotifier extends StateNotifier<AuthState> {
-  AuthNotifier(this._repository) : super(const AuthState());
-
-  final AuthRepository _repository;
+  AuthNotifier() : super(const AuthState());
 
   Future<void> restoreSession() async {
-    state = state.copyWith(isLoading: true);
+    state = const AuthState(isLoading: true);
     try {
-      final employee = await _repository
-          .currentSession()
-          .timeout(const Duration(seconds: 5));
-      state = AuthState(employee: employee, isLoading: false);
+      final prefs =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      final id = prefs.getString(AppConstants.keyEmployeeId);
+      if (id == null || id.isEmpty) {
+        state = const AuthState(isLoading: false);
+        return;
+      }
+      final name = prefs.getString(AppConstants.keyEmployeeName) ?? id;
+      state = AuthState(
+        employee: Employee(employeeId: id, employeeName: name, passwordHash: ''),
+        isLoading: false,
+      );
     } catch (_) {
       state = const AuthState(isLoading: false);
     }
   }
 
-  Future<bool> login(String employeeId, String password) async {
-    if (employeeId.trim().isEmpty || password.isEmpty) {
-      state = state.copyWith(
-        errorMessage: 'Employee ID and password are required.',
-      );
-      return false;
-    }
-    state = state.copyWith(isLoading: true, clearError: true);
-
+  Future<void> setEmployeeName(String name) async {
+    final id = name.trim();
     try {
-      final employee = await _repository
-          .login(employeeId.trim(), password)
-          .timeout(const Duration(seconds: 10));
-      if (employee == null) {
-        state = state.copyWith(
-          isLoading: false,
-          errorMessage: 'Invalid Employee ID or password.',
-        );
-        return false;
-      }
-      state = AuthState(employee: employee, isLoading: false);
-      return true;
-    } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage:
-            'Login is taking too long. If your phone has no screen lock (PIN/pattern) set, please set one and try again.',
-      );
-      return false;
+      final prefs =
+          await SharedPreferences.getInstance().timeout(const Duration(seconds: 3));
+      await prefs.setString(AppConstants.keyEmployeeId, id);
+      await prefs.setString(AppConstants.keyEmployeeName, id);
+    } catch (_) {
+      // Even if persistence fails, still let the employee proceed to the
+      // dashboard for this session rather than blocking them.
     }
+    state = AuthState(
+      employee: Employee(employeeId: id, employeeName: id, passwordHash: ''),
+      isLoading: false,
+    );
   }
 
   Future<void> logout() async {
-    await _repository.logout();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(AppConstants.keyEmployeeId);
+      await prefs.remove(AppConstants.keyEmployeeName);
+    } catch (_) {}
     state = const AuthState();
   }
 }
 
 final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
-  return AuthNotifier(ref.watch(authRepositoryProvider));
+  return AuthNotifier();
 });
