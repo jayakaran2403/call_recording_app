@@ -1,92 +1,75 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../core/constants.dart';
+import '../database/database_helper.dart';
 import '../models/employee.dart';
-import '../repository/auth_repository.dart';
 
-final authRepositoryProvider = Provider<AuthRepository>((ref) {
-  return AuthRepository();
-});
+/// Handles employee authentication and persistence of the logged-in
+/// session.
+///
+/// Session state (which employee is currently logged in) is stored via
+/// SharedPreferences rather than flutter_secure_storage. The actual
+/// password is never stored in plaintext anywhere — only its SHA-256
+/// hash lives in the local SQLite database. SharedPreferences here only
+/// remembers *which* employee ID is currently signed in, which isn't
+/// sensitive on its own, so the extra Android Keystore-backed encryption
+/// layer isn't needed for this value and was a source of unreliable
+/// hangs on some devices.
+class AuthRepository {
+  String _hash(String value) => sha256.convert(utf8.encode(value)).toString();
 
-class AuthState {
-  final Employee? employee;
-  final bool isLoading;
-  final String? errorMessage;
+  /// Validates credentials against the local employee cache.
+  ///
+  /// NOTE: In production this should first call the backend auth API and
+  /// cache the resulting employee record locally for offline login. The
+  /// local-only check below is the offline fallback / dev-mode path.
+  Future<Employee?> login(String employeeId, String password) async {
+    final existing = await DatabaseHelper.instance.getEmployeeById(employeeId);
+    final hashed = _hash(password);
 
-  const AuthState({this.employee, this.isLoading = false, this.errorMessage});
-
-  bool get isLoggedIn => employee != null;
-
-  AuthState copyWith({
-    Employee? employee,
-    bool? isLoading,
-    String? errorMessage,
-    bool clearError = false,
-  }) {
-    return AuthState(
-      employee: employee ?? this.employee,
-      isLoading: isLoading ?? this.isLoading,
-      errorMessage: clearError ? null : errorMessage ?? this.errorMessage,
-    );
-  }
-}
-
-class AuthNotifier extends StateNotifier<AuthState> {
-  AuthNotifier(this._repository) : super(const AuthState());
-
-  final AuthRepository _repository;
-
-  Future<void> restoreSession() async {
-    state = state.copyWith(isLoading: true);
-    try {
-      final employee =
-          await _repository.currentSession().timeout(const Duration(seconds: 5));
-      state = AuthState(employee: employee, isLoading: false);
-    } catch (_) {
-      state = const AuthState(isLoading: false);
-    }
-  }
-
-  Future<bool> login(String employeeId, String password) async {
-    if (employeeId.trim().isEmpty || password.isEmpty) {
-      state = state.copyWith(
-        errorMessage: 'Employee ID and password are required.',
+    Employee employee;
+    if (existing == null) {
+      // First-time login on this device — cache locally.
+      // Replace with a real API call before production rollout.
+      employee = Employee(
+        employeeId: employeeId,
+        employeeName: employeeId,
+        passwordHash: hashed,
+        loginTime: DateTime.now(),
       );
-      return false;
+      await DatabaseHelper.instance.upsertEmployee(employee);
+    } else {
+      if (existing.passwordHash != hashed) return null;
+      employee = existing.copyWith(loginTime: DateTime.now());
+      await DatabaseHelper.instance.upsertEmployee(employee);
     }
-    state = state.copyWith(isLoading: true, clearError: true);
 
-    try {
-      final employee = await _repository
-          .login(employeeId.trim(), password)
-          .timeout(const Duration(seconds: 10));
-      if (employee == null) {
-        state = state.copyWith(
-          isLoading: false,
-          errorMessage: 'Invalid Employee ID or password.',
-        );
-        return false;
-      }
-      state = AuthState(employee: employee, isLoading: false);
-      return true;
-    } catch (e) {
-      // Covers timeouts (e.g. secure storage / keystore issues on devices
-      // without a screen lock set) and any other unexpected failure, so
-      // the login button never spins forever.
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage:
-            'Login is taking too long. If your phone has no screen lock (PIN/pattern) set, please set one and try again.',
-      );
-      return false;
-    }
+    await _persistSession(employee);
+    return employee;
+  }
+
+  Future<void> _persistSession(Employee employee) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(AppConstants.keyEmployeeId, employee.employeeId);
+    await prefs.setString(AppConstants.keyEmployeeName, employee.employeeName);
+    await prefs.setString(
+        AppConstants.prefLoggedInEmployeeId, employee.employeeId);
   }
 
   Future<void> logout() async {
-    await _repository.logout();
-    state = const AuthState();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(AppConstants.keyEmployeeId);
+    await prefs.remove(AppConstants.keyEmployeeName);
+    await prefs.remove(AppConstants.prefLoggedInEmployeeId);
+  }
+
+  Future<Employee?> currentSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    final employeeId = prefs.getString(AppConstants.keyEmployeeId);
+    if (employeeId == null) return null;
+    return DatabaseHelper.instance.getEmployeeById(employeeId);
   }
 }
-
-final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
-  return AuthNotifier(ref.watch(authRepositoryProvider));
-});
