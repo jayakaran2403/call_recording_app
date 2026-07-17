@@ -37,8 +37,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   Future<void> restoreSession() async {
     state = state.copyWith(isLoading: true);
-    final employee = await _repository.currentSession();
-    state = AuthState(employee: employee, isLoading: false);
+    try {
+      final employee =
+          await _repository.currentSession().timeout(const Duration(seconds: 5));
+      state = AuthState(employee: employee, isLoading: false);
+    } catch (_) {
+      state = const AuthState(isLoading: false);
+    }
   }
 
   Future<bool> login(String employeeId, String password) async {
@@ -49,16 +54,31 @@ class AuthNotifier extends StateNotifier<AuthState> {
       return false;
     }
     state = state.copyWith(isLoading: true, clearError: true);
-    final employee = await _repository.login(employeeId.trim(), password);
-    if (employee == null) {
+
+    try {
+      final employee = await _repository
+          .login(employeeId.trim(), password)
+          .timeout(const Duration(seconds: 10));
+      if (employee == null) {
+        state = state.copyWith(
+          isLoading: false,
+          errorMessage: 'Invalid Employee ID or password.',
+        );
+        return false;
+      }
+      state = AuthState(employee: employee, isLoading: false);
+      return true;
+    } catch (e) {
+      // Covers timeouts (e.g. secure storage / keystore issues on devices
+      // without a screen lock set) and any other unexpected failure, so
+      // the login button never spins forever.
       state = state.copyWith(
         isLoading: false,
-        errorMessage: 'Invalid Employee ID or password.',
+        errorMessage:
+            'Login is taking too long. If your phone has no screen lock (PIN/pattern) set, please set one and try again.',
       );
       return false;
     }
-    state = AuthState(employee: employee, isLoading: false);
-    return true;
   }
 
   Future<void> logout() async {
