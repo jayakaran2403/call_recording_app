@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../core/theme.dart';
 import '../providers/auth_provider.dart';
 import 'dashboard_screen.dart';
 
@@ -14,47 +13,25 @@ class LoginScreen extends ConsumerStatefulWidget {
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _employeeIdController = TextEditingController();
-  final _passwordController = TextEditingController();
-  bool _obscurePassword = true;
+  final _nameController = TextEditingController();
 
   @override
   void dispose() {
-    _employeeIdController.dispose();
-    _passwordController.dispose();
+    _nameController.dispose();
     super.dispose();
   }
 
-  Future<void> _submit() async {
+  Future<void> _continue() async {
     if (!_formKey.currentState!.validate()) return;
-    final success = await ref.read(authProvider.notifier).login(
-          _employeeIdController.text,
-          _passwordController.text,
-        );
+    await ref.read(authProvider.notifier).setEmployeeName(_nameController.text.trim());
     if (!mounted) return;
-    if (success) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const DashboardScreen()),
-      );
-    }
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const DashboardScreen()),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final authState = ref.watch(authProvider);
-
-    ref.listen(authProvider, (previous, next) {
-      if (next.errorMessage != null &&
-          next.errorMessage != previous?.errorMessage) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(next.errorMessage!),
-            backgroundColor: AppTheme.errorRed,
-          ),
-        );
-      }
-    });
-
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -65,77 +42,47 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const SizedBox(height: 40),
-                  Container(
-                    alignment: Alignment.center,
+                  const SizedBox(height: 60),
+                  Center(
                     child: Container(
                       width: 72,
                       height: 72,
                       decoration: BoxDecoration(
-                        color: AppTheme.accentBlue,
+                        color: const Color(0xFFE8F1FB),
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      child: const Icon(Icons.badge_outlined,
-                          size: 36, color: AppTheme.primaryBlue),
+                      child: const Icon(Icons.badge_outlined, size: 36, color: Color(0xFF1256A3)),
                     ),
                   ),
                   const SizedBox(height: 24),
                   const Text(
-                    'Employee Login',
+                    'Employee Details',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Sign in to activate call recording',
+                    'Enter your name to start call recording',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
                   ),
                   const SizedBox(height: 36),
                   TextFormField(
-                    controller: _employeeIdController,
+                    controller: _nameController,
                     decoration: const InputDecoration(
-                      labelText: 'Employee ID',
-                      hintText: 'e.g. JK24',
+                      labelText: 'Employee Name / ID',
+                      hintText: 'e.g. JK24 or Jayakaran',
                       prefixIcon: Icon(Icons.person_outline),
                     ),
-                    textInputAction: TextInputAction.next,
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? 'Enter your Employee ID' : null,
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _passwordController,
-                    obscureText: _obscurePassword,
-                    decoration: InputDecoration(
-                      labelText: 'Password',
-                      prefixIcon: const Icon(Icons.lock_outline),
-                      suffixIcon: IconButton(
-                        icon: Icon(_obscurePassword
-                            ? Icons.visibility_outlined
-                            : Icons.visibility_off_outlined),
-                        onPressed: () =>
-                            setState(() => _obscurePassword = !_obscurePassword),
-                      ),
-                    ),
                     textInputAction: TextInputAction.done,
-                    onFieldSubmitted: (_) => _submit(),
+                    onFieldSubmitted: (_) => _continue(),
                     validator: (v) =>
-                        (v == null || v.isEmpty) ? 'Enter your password' : null,
+                        (v == null || v.trim().isEmpty) ? 'Enter your name to continue' : null,
                   ),
                   const SizedBox(height: 28),
                   ElevatedButton(
-                    onPressed: authState.isLoading ? null : _submit,
-                    child: authState.isLoading
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Text('Login'),
+                    onPressed: _continue,
+                    child: const Text('Continue'),
                   ),
                   const SizedBox(height: 24),
                 ],
